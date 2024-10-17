@@ -2,26 +2,26 @@ import re
 import random
 import json
 from math import gcd
-from fitness import Breaker  # Asegúrate de tener la clase Breaker en fitness.py
+from fitness import Breaker  # Ensure that you have the Breaker class in fitness.py
 
-# Constantes para el alfabeto inglés
+# Constants for the English alphabet
 ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-M = len(ALPHABET)  # m = 26 para el alfabeto inglés
+M = len(ALPHABET)  # m = 26 for the English alphabet
 
-# Función para calcular el inverso multiplicativo modular
+# Function to calculate the modular multiplicative inverse
 def mod_inverse(a, m):
-    """Devuelve el inverso multiplicativo de 'a' módulo 'm' si existe."""
+    """Returns the modular multiplicative inverse of 'a' modulo 'm' if it exists."""
     for x in range(1, m):
         if (a * x) % m == 1:
             return x
     return None
 
-# Función para descifrar usando Affine Cipher
+# Function to decrypt using the Affine Cipher
 def affine_decrypt(ciphertext, a, b):
-    """Descifra un texto cifrado usando el Affine Cipher con la clave (a, b)."""
-    a_inv = mod_inverse(a, M)  # Inverso multiplicativo de a
+    """Decrypts a ciphertext using the Affine Cipher with the key (a, b)."""
+    a_inv = mod_inverse(a, M)  # Multiplicative inverse of a
     if a_inv is None:
-        return None  # Si no hay inverso, la clave no es válida
+        return None  # If there is no inverse, the key is invalid
 
     plaintext = ''
     for char in ciphertext:
@@ -30,64 +30,76 @@ def affine_decrypt(ciphertext, a, b):
             x = (a_inv * (y - b)) % M
             plaintext += ALPHABET[x]
         else:
-            plaintext += char  # Dejar cualquier símbolo no alfabético sin cambio
+            plaintext += char  # Keep any non-alphabetic symbols unchanged
     return plaintext
 
-# Función para probar todas las combinaciones de (a, b)
-def break_affine_cipher_iteratively(ciphertext, breaker, max_iterations=10, restart_threshold=100):
-    """Prueba todas las combinaciones de a y b iterativamente para romper el Affine Cipher."""
-    best_fitness = float('-inf')
-    best_plaintext = None
-    best_a, best_b = None, None
-    improvement_threshold = 0.01  # Cambios mínimos en fitness para detener la iteración
+# Function to try all combinations of (a, b)
+def break_affine_cipher_iteratively(ciphertext, quadgrams, alphabet, max_iterations=10, restart_threshold=100):
+    """Tests all combinations of a and b iteratively to break the Affine Cipher."""
+    top_results = []  # Store top five results as tuples (fitness, plaintext, a, b)
     no_improvement_count = 0
 
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1} ---")
         for a in range(1, M):
             if gcd(a, M) != 1:
-                continue  # a y m deben ser coprimos
+                continue  # a and m must be coprime
             for b in range(M):
                 plaintext = affine_decrypt(ciphertext, a, b)
                 if plaintext:
-                    fitness = breaker.calc_fitness(plaintext)
-                    if fitness > best_fitness + improvement_threshold:
-                        best_fitness = fitness
-                        best_plaintext = plaintext
-                        best_a, best_b = a, b
-                        no_improvement_count = 0
-                        print(f"New best fitness {fitness} with a={a}, b={b}")
+                    fitness = calc_fitness(plaintext, quadgrams, alphabet)  # Use the provided calc_fitness function
+                    # Store results in a list and keep it sorted to have the top five
+                    # Ensure we only add it if it's not a duplicate plaintext in the top results
+                    if len(top_results) < 5 or fitness > top_results[-1][0]:
+                        if not any(p == plaintext for _, p, _, _ in top_results):
+                            # Add the new result and sort the list by fitness (descending)
+                            top_results.append((fitness, plaintext, a, b))
+                            top_results.sort(reverse=True, key=lambda x: x[0])
+                            # Keep only the top five results
+                            top_results = top_results[:5]
+                            no_improvement_count = 0
+                            print(f"New entry in top results: fitness {fitness} with a={a}, b={b}")
                     else:
                         no_improvement_count += 1
 
-        # Reiniciar si no hay mejora después de restart_threshold intentos
+        # Restart if no improvement after restart_threshold attempts
         if no_improvement_count > restart_threshold:
             print(f"Restarting search after {no_improvement_count} combinations with no improvement.")
             no_improvement_count = 0  # Reset counter
 
-        # Si la mejora es muy pequeña o se alcanzó el límite de iteraciones sin mejora, detener
+            # Randomize the starting point for `a` and `b` to diversify the search space
+            random.shuffle(top_results)  # Change order to explore different possibilities next
+
+        # If the improvement is minimal or the iteration limit is reached, stop
         if no_improvement_count > max_iterations * M:
             print(f"No significant improvement detected, stopping search.")
             break
 
-    return best_plaintext, best_a, best_b, best_fitness
+    return top_results
 
-# Ciphertext proporcionado (Affine Cipher)
+# Ciphertext provided (Affine Cipher)
 ciphertext = '''
 KQEREJEBCPPCJCRKIEACUZBKRVPKRBCIBQCARBJCVFCUPKRIOFKPACUZQEPBKRXPEIIEABDKPBCPFCDCCAFIEABDKPBCPFEQPKAZBKRHAIBKAPCCIBURCCDKDCCJCIDFUIXPAFFERBICZDFKABICBBENEFCUPJCVKABPCYDCCDPKBCOCPERKIVKSCPICBRKIJPKABI
 '''.replace('\n', '')
 
-# Limpiar el texto cifrado
+# Clean the ciphertext
 clean_text = re.sub(r'[^A-Z]', '', ciphertext.upper())
 
-# Abrir el archivo de quadgrams y crear una instancia del Breaker
-with open("EN.json", "r") as quadgram_fh:
-    breaker = Breaker(quadgram_fh)
+# Open the quadgram file and create a Breaker instance
+with open("./EN.json", "r") as quadgram_fh:
+    quadgram_data = json.load(quadgram_fh)
+    alphabet = quadgram_data["alphabet"]
+    quadgrams = quadgram_data["quadgrams"]
 
-# Romper el Affine Cipher iterativamente
-best_plaintext, best_a, best_b, best_fitness = break_affine_cipher_iteratively(clean_text, breaker)
+# Break the Affine Cipher iteratively using the provided calc_fitness function
+top_results = break_affine_cipher_iteratively(clean_text, quadgrams, alphabet)
 
-# Mostrar los resultados finales
-print(f"\nBest plaintext: {best_plaintext}")
-print(f"Best a: {best_a}, Best b: {best_b}")
-print(f"Best fitness score: {best_fitness}")
+# Display the top five results, sorted from highest to lowest fitness
+top_results.sort(reverse=True, key=lambda x: x[0])  # Sort by fitness in descending order
+
+print("\nTop 5 Decryption Results:")
+for i, (fitness, plaintext, a, b) in enumerate(top_results, 1):
+    print(f"\nResult {i}:")
+    print(f"Plaintext: {plaintext}")
+    print(f"a: {a}, b: {b}")
+    print(f"Fitness Score: {fitness}")
